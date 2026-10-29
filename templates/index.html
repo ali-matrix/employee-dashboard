@@ -1,0 +1,390 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workforce | Employee Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="brand"><span class="brand-icon">W</span> Workforce</div>
+        <p class="nav-label">WORKSPACE</p>
+        <a class="nav-item active" href="/">▦ &nbsp; Dashboard</a>
+        <a class="nav-item" href="#employees">♙ &nbsp; Employees</a>
+        <div class="sidebar-bottom">
+            <div class="avatar">AD</div>
+            <div><strong>Admin User</strong><small>Administrator</small></div>
+        </div>
+    </aside>
+
+    <main class="main">
+        <header class="topbar">
+            <div>
+                <p class="eyebrow">WORKSPACE / OVERVIEW</p>
+                <h1>Workforce Overview</h1>
+                <p class="muted">Monitor your team and employee performance.</p>
+            </div>
+            <button class="primary-btn" id="addEmployeeBtn">+ Add Employee</button>
+        </header>
+
+        <section class="stats-grid">
+            <article class="stat-card">
+                <div class="stat-top"><span>Total Employees</span><span class="stat-icon blue">♙</span></div>
+                <h2 id="totalEmployees">—</h2>
+                <p class="muted">Across all departments</p>
+            </article>
+            <article class="stat-card">
+                <div class="stat-top"><span>Active Employees</span><span class="stat-icon green">✓</span></div>
+                <h2 id="activeEmployees">—</h2>
+                <p class="muted">Currently active</p>
+            </article>
+            <article class="stat-card">
+                <div class="stat-top"><span>Departments</span><span class="stat-icon purple">▦</span></div>
+                <h2 id="departmentCount">—</h2>
+                <p class="muted">Organizational teams</p>
+            </article>
+            <article class="stat-card">
+                <div class="stat-top"><span>Average Salary</span><span class="stat-icon orange">₨</span></div>
+                <h2 id="averageSalary">—</h2>
+                <p class="muted">Monthly salary average</p>
+            </article>
+        </section>
+
+        <section class="panel" id="employees">
+            <div class="panel-heading">
+                <div>
+                    <h2>Employee Directory</h2>
+                    <p class="muted">Manage and review your workforce.</p>
+                </div>
+                <span class="record-count" id="recordCount">Loading...</span>
+            </div>
+
+            <div class="filters">
+                <input id="searchInput" type="search" placeholder="Search name, email or role...">
+                <select id="departmentFilter">
+                    <option value="">All departments</option>
+                </select>
+                <select id="statusFilter">
+                    <option value="">All statuses</option>
+                    <option>Active</option>
+                    <option>On Leave</option>
+                    <option>Inactive</option>
+                </select>
+            </div>
+
+            <div id="message" class="message" role="status"></div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>EMPLOYEE</th>
+                            <th>DEPARTMENT</th>
+                            <th>DESIGNATION</th>
+                            <th>SALARY / MONTH</th>
+                            <th>STATUS</th>
+                            <th>ACTIONS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="employeeTable">
+                        <tr><td colspan="6" class="empty">Loading employees...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <footer>Workforce Dashboard <span>•</span> Powered by Flask & SQLite</footer>
+    </main>
+
+    <dialog id="employeeDialog">
+        <form id="employeeForm">
+            <div class="dialog-heading">
+                <div>
+                    <h2 id="dialogTitle">Add Employee</h2>
+                    <p class="muted">Enter the employee details below.</p>
+                </div>
+                <button type="button" class="close-btn" id="closeDialog" aria-label="Close">×</button>
+            </div>
+
+            <label>First name<input name="first_name" required maxlength="80"></label>
+            <label>Last name<input name="last_name" required maxlength="80"></label>
+            <label>Email<input name="email" type="email" required maxlength="150"></label>
+            <label>Department<select name="department_id" id="formDepartment" required></select></label>
+            <label>Designation<input name="designation" required maxlength="100"></label>
+            <label>Monthly salary (PKR)<input name="salary" type="number" min="0" step="0.01" required></label>
+            <label>Joining date<input name="joining_date" type="date" required></label>
+            <label>Status
+                <select name="status" required>
+                    <option>Active</option>
+                    <option>On Leave</option>
+                    <option>Inactive</option>
+                </select>
+            </label>
+            <p id="formError" class="form-error"></p>
+            <div class="dialog-actions">
+                <button type="button" class="secondary-btn" id="cancelDialog">Cancel</button>
+                <button type="submit" class="primary-btn" id="saveEmployeeBtn">Save Employee</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script>
+        const table = document.getElementById("employeeTable");
+        const message = document.getElementById("message");
+        const dialog = document.getElementById("employeeDialog");
+        const form = document.getElementById("employeeForm");
+
+        let departments = [];
+        let employees = [];
+        let editingId = null;
+        let searchTimer;
+
+        const money = value => "Rs. " + Number(value).toLocaleString("en-PK", {
+            maximumFractionDigits: 0
+        });
+
+        function showMessage(text, isError = false) {
+            message.textContent = text;
+            message.className = "message " + (isError ? "error" : "success");
+        }
+
+        async function api(url, options = {}) {
+            const response = await fetch(url, options);
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || "Request failed");
+            }
+
+            return data;
+        }
+
+        async function loadStats() {
+            const stats = await api("/api/stats");
+
+            document.getElementById("totalEmployees").textContent =
+                stats.total_employees;
+            document.getElementById("activeEmployees").textContent =
+                stats.active_employees;
+            document.getElementById("departmentCount").textContent =
+                stats.departments.length;
+            document.getElementById("averageSalary").textContent =
+                money(stats.average_salary);
+        }
+
+        async function loadDepartments() {
+            // The current stats API also provides department names.
+            const stats = await api("/api/stats");
+            departments = stats.departments;
+
+            const filter = document.getElementById("departmentFilter");
+            const formDepartment = document.getElementById("formDepartment");
+
+            departments.forEach(department => {
+                const option = new Option(department.name, department.name);
+                filter.add(option);
+
+                formDepartment.add(
+                    new Option(department.name, department.id)
+                );
+            });
+        }
+
+        function createCell(text, className = "") {
+            const cell = document.createElement("td");
+            cell.textContent = text ?? "";
+            if (className) cell.className = className;
+            return cell;
+        }
+
+        function renderEmployees() {
+            table.replaceChildren();
+
+            document.getElementById("recordCount").textContent =
+                `${employees.length} records`;
+
+            if (employees.length === 0) {
+                const row = document.createElement("tr");
+                const cell = createCell("No employees found.", "empty");
+                cell.colSpan = 6;
+                row.append(cell);
+                table.append(row);
+                return;
+            }
+
+            employees.forEach(employee => {
+                const row = document.createElement("tr");
+
+                const personCell = document.createElement("td");
+                const person = document.createElement("div");
+                person.className = "person";
+                const avatar = document.createElement("span");
+                avatar.className = "person-avatar";
+                avatar.textContent =
+                    (employee.first_name[0] || "") +
+                    (employee.last_name[0] || "");
+                const info = document.createElement("div");
+                const name = document.createElement("strong");
+                name.textContent =
+                    `${employee.first_name} ${employee.last_name}`;
+                const email = document.createElement("small");
+                email.textContent = employee.email;
+                info.append(name, email);
+                person.append(avatar, info);
+                personCell.append(person);
+                row.append(personCell);
+
+                row.append(createCell(employee.department));
+                row.append(createCell(employee.designation));
+                row.append(createCell(money(employee.salary)));
+
+                const statusCell = document.createElement("td");
+                const badge = document.createElement("span");
+                badge.className =
+                    "status status-" + employee.status.toLowerCase().replace(" ", "-");
+                badge.textContent = employee.status;
+                statusCell.append(badge);
+                row.append(statusCell);
+
+                const actions = document.createElement("td");
+                actions.className = "actions";
+
+                const edit = document.createElement("button");
+                edit.className = "text-btn";
+                edit.textContent = "Edit";
+                edit.addEventListener("click", () => openEdit(employee));
+
+                const remove = document.createElement("button");
+                remove.className = "text-btn delete-btn";
+                remove.textContent = "Delete";
+                remove.addEventListener("click", () => deleteEmployee(employee));
+
+                actions.append(edit, remove);
+                row.append(actions);
+                table.append(row);
+            });
+        }
+
+        async function loadEmployees() {
+            const params = new URLSearchParams();
+            const search = document.getElementById("searchInput").value.trim();
+            const department = document.getElementById("departmentFilter").value;
+            const status = document.getElementById("statusFilter").value;
+
+            if (search) params.set("search", search);
+            if (department) params.set("department", department);
+            if (status) params.set("status", status);
+
+            try {
+                const result = await api("/api/employees?" + params.toString());
+                employees = result.employees;
+                renderEmployees();
+            } catch (error) {
+                showMessage(error.message, true);
+            }
+        }
+
+        function openAdd() {
+            editingId = null;
+            form.reset();
+            document.getElementById("dialogTitle").textContent = "Add Employee";
+            document.getElementById("saveEmployeeBtn").textContent = "Save Employee";
+            document.getElementById("formError").textContent = "";
+            form.elements.joining_date.value = new Date().toISOString().slice(0, 10);
+            dialog.showModal();
+        }
+
+        function openEdit(employee) {
+            editingId = employee.id;
+            form.reset();
+
+            for (const field of [
+                "first_name", "last_name", "email", "department_id",
+                "designation", "salary", "joining_date", "status"
+            ]) {
+                form.elements[field].value = employee[field];
+            }
+
+            document.getElementById("dialogTitle").textContent = "Edit Employee";
+            document.getElementById("saveEmployeeBtn").textContent = "Update Employee";
+            document.getElementById("formError").textContent = "";
+            dialog.showModal();
+        }
+
+        form.addEventListener("submit", async event => {
+            event.preventDefault();
+
+            const data = Object.fromEntries(new FormData(form).entries());
+            data.department_id = Number(data.department_id);
+            data.salary = Number(data.salary);
+
+            const saveButton = document.getElementById("saveEmployeeBtn");
+            saveButton.disabled = true;
+            document.getElementById("formError").textContent = "";
+
+            try {
+                await api(
+                    editingId ? `/api/employees/${editingId}` : "/api/employees",
+                    {
+                        method: editingId ? "PUT" : "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(data)
+                    }
+                );
+
+                dialog.close();
+                showMessage(editingId
+                    ? "Employee updated successfully."
+                    : "Employee added successfully.");
+
+                await Promise.all([loadStats(), loadEmployees()]);
+            } catch (error) {
+                document.getElementById("formError").textContent = error.message;
+            } finally {
+                saveButton.disabled = false;
+            }
+        });
+
+        async function deleteEmployee(employee) {
+            const confirmed = confirm(
+                `Delete ${employee.first_name} ${employee.last_name}? This cannot be undone.`
+            );
+
+            if (!confirmed) return;
+
+            try {
+                await api(`/api/employees/${employee.id}`, { method: "DELETE" });
+                showMessage("Employee deleted successfully.");
+                await Promise.all([loadStats(), loadEmployees()]);
+            } catch (error) {
+                showMessage(error.message, true);
+            }
+        }
+
+        document.getElementById("addEmployeeBtn").addEventListener("click", openAdd);
+        document.getElementById("closeDialog").addEventListener("click", () => dialog.close());
+        document.getElementById("cancelDialog").addEventListener("click", () => dialog.close());
+
+        document.getElementById("searchInput").addEventListener("input", () => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(loadEmployees, 250);
+        });
+
+        document.getElementById("departmentFilter").addEventListener("change", loadEmployees);
+        document.getElementById("statusFilter").addEventListener("change", loadEmployees);
+
+        async function initDashboard() {
+            try {
+                await loadDepartments();
+                await Promise.all([loadStats(), loadEmployees()]);
+            } catch (error) {
+                showMessage("Could not load dashboard: " + error.message, true);
+            }
+        }
+
+        initDashboard();
+    </script>
+</body>
+</html>
